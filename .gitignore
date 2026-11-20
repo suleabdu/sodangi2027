@@ -1,0 +1,22 @@
+# Dependencies and generated builds
+node_modules/
+dist/
+
+# Wrangler / Miniflare local state and logs
+.wrangler/
+.dev.vars
+.dev.vars.*
+
+# Environment files — retain the documented, non-secret example only
+.env
+.env.*
+!.env.example
+
+# Test output and operating-system files
+coverage/
+playwright-report/
+test-results/
+backups/
+*.log
+.DS_Store
+Thumbs.db

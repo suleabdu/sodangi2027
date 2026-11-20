@@ -1,0 +1,20 @@
+{
+  "name":"sodangi-2027-platform",
+  "private":true,
+  "version":"1.0.0",
+  "type":"module",
+  "engines":{"node":">=22 <25","npm":">=10"},
+  "scripts":{
+    "dev":"vite",
+    "build":"tsc --noEmit && vite build",
+    "test":"node tests/check_typescript_syntax.mjs && python tests/check_release.py",
+    "check":"npm run build && npm run test",
+    "preview":"vite preview",
+    "cf:local":"npm run build && wrangler pages dev dist --d1 DB=f90ecdfb-f670-4ba3-9a8e-1a57c5b4b9f8 --r2 MEDIA=sodangi-media-local --binding ENVIRONMENT=development --binding SITE_ORIGIN=http://localhost:8788 --port 8788",
+    "db:local":"wrangler d1 execute DB --config wrangler.local.toml --local --file=./database/schema.sql",
+    "db:remote":"wrangler d1 execute sodangi-cms --remote --file=./database/schema.sql",
+    "deploy":"npm run build && wrangler pages deploy dist --project-name sodangi-2027"
+  },
+  "dependencies":{"react":"^19.1.0","react-dom":"^19.1.0","lucide-react":"^0.468.0","jose":"^6.0.0"},
+  "devDependencies":{"vite":"^6.2.7","typescript":"^5.8.0","@vitejs/plugin-react":"^4.7.0","@types/react":"^19.1.0","@types/react-dom":"^19.1.0","wrangler":"^4.30.0"}
+}

@@ -1,0 +1,24 @@
+# Development-only local-data configuration. `db:local` uses it to seed
+# Miniflare storage; `cf:local` passes the matching bindings directly because
+# Wrangler Pages development does not accept a custom config path.
+# It never connects to campaign resources. Do not use this file to deploy.
+name = "sodangi-2027-local"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-11-01"
+
+[vars]
+ENVIRONMENT = "development"
+SITE_ORIGIN = "http://localhost:8788"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sodangi-cms-local"
+# This is a fixed local-only identifier, not a Cloudflare database ID.
+database_id = "f90ecdfb-f670-4ba3-9a8e-1a57c5b4b9f8"
+# Keep the preview identifier identical to the local database ID so the
+# seeding command and `wrangler pages dev` share one Miniflare database.
+preview_database_id = "f90ecdfb-f670-4ba3-9a8e-1a57c5b4b9f8"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "sodangi-media-local"

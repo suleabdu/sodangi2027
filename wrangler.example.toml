@@ -1,0 +1,20 @@
+# Copy to wrangler.toml after creating resources in the campaign-owned Cloudflare account.
+# This file is safe to commit. Keep API keys and all other secrets in Cloudflare Secrets,
+# never in wrangler.toml or .dev.vars committed to Git.
+name = "sodangi-2027"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-11-01"
+
+[vars]
+ENVIRONMENT = "production"
+SITE_ORIGIN = "https://YOUR-PROJECT.pages.dev"
+# ACCESS_TEAM_DOMAIN and ACCESS_AUD can be configured here; secrets via Cloudflare dashboard
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sodangi-cms"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "sodangi-media"
