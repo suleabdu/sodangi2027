@@ -411,11 +411,19 @@ Follow this route only if one trusted owner will operate the dashboard and you d
 
 6. **Create a fresh production deployment.** Follow section 10 after the current code and migration are in place. A Git-connected Pages project can use the next push to `main`; otherwise run the deployment command in section 10. Wait until Pages shows the deployment as successful.
 
-7. **Test it in a private browser window.** Open `https://YOUR-SITE/admin`. You should see an administrator-password form. Enter the password once. The dashboard should load and the public homepage must remain public.
+7. **Remove a previous Cloudflare Access edge gate, if one exists.** Password mode cannot display its own sign-in form while an old Access application is still redirecting `/admin` or `/api/admin/*` to Cloudflare Access.
 
-8. **Test sign-out.** Use **Sign out** in the dashboard sidebar, then reload `/admin`. The password form must return. The browser session expires after eight hours even if you forget to sign out.
+   - First confirm that step 6 completed and both password secrets are stored. Do **not** remove Access before password mode is ready.
+   - In **Zero Trust → Access controls → Applications**, find only the application whose public hostname/path protects this project’s `/admin` or `/api/admin/*` routes.
+   - Delete that application, or remove those project paths from it, then save. Keep a separate preview-only application only if you deliberately use protected previews.
+   - Do **not** create an `Everyone` or `Bypass` policy as a workaround. The application’s password session is now the protection for the public admin route.
+   - In a private browser, open `https://YOUR-SITE/api/admin/auth/config`. It must show a small JSON response, not a Cloudflare Access page or a `302` redirect.
 
-9. **Keep the password route limited.** Anyone with this shared password has full edit access and appears in the audit trail as `password-admin`. If you later add editors, need MFA, or need to know who made each change, switch to the Access route below instead.
+8. **Test it in a private browser window.** Open `https://YOUR-SITE/admin`. You should see an administrator-password form. Enter the password once. The dashboard should load and the public homepage must remain public.
+
+9. **Test sign-out.** Use **Sign out** in the dashboard sidebar, then reload `/admin`. The password form must return. The browser session expires after eight hours even if you forget to sign out.
+
+10. **Keep the password route limited.** Anyone with this shared password has full edit access and appears in the audit trail as `password-admin`. If you later add editors, need MFA, or need to know who made each change, switch to the Access route below instead.
 
 Password mode uses a `Secure`, `HttpOnly`, `SameSite=Strict` browser cookie, a server-side D1 session, a per-session CSRF token, and a five-failure/15-minute login throttle. It is intended for the HTTPS production site. Continue using `LOCAL_ADMIN_TOKEN` only for localhost development.
 
