@@ -1,10 +1,10 @@
 # SODANGI 2027 — beginner setup, administration and launch guide
 
-**Version 2.0 · Updated 19 November 2026**
+**Version 2.1 · Updated 22 November 2026**
 
 This guide takes a first-time administrator from an unzipped project folder to a protected live website. Follow the steps in order. Do not skip the security steps simply because the public pages appear to work: the content studio can change public information, so it must be protected before anyone is invited to use it.
 
-> **Before you begin:** this project is source code, not an already-hosted website. It has not been deployed to a campaign-owned Cloudflare account by this guide. You need authority to use the campaign's Cloudflare account, domain, approved content, and (only if desired) Meta and Brevo accounts.
+> **Before you begin:** this project is source code, not a public sign-in system by itself. You need authority to use the campaign's Cloudflare account, domain, approved content, and (only if desired) Meta and Brevo accounts.
 
 ## Contents
 
@@ -36,7 +36,8 @@ The package contains a mobile-first public information website and a private con
 | Cloudflare Pages | Hosts the public site and the server-side API. | Technical administrator |
 | Cloudflare D1 | Stores website settings, stories, translations, newsletter records, integration settings and audit history. | Technical administrator / application |
 | Cloudflare R2 | Stores images and optional licensed audio uploaded through the studio. | Optional, but required for uploads |
-| Cloudflare Access | Signs in and authorises studio users. | Required before production use |
+| Cloudflare Access | Recommended sign-in for several editors: named accounts, MFA and a clear audit identity. | Recommended for teams |
+| Built-in password sign-in | An optional, separate `/admin` sign-in for one trusted owner who does not want to configure Zero Trust policies. | One trusted owner only |
 | Optional Facebook Worker | Checks the official Facebook Page on a schedule and imports new posts for editorial review. | Technical administrator |
 
 ### A few words used in this guide
@@ -67,7 +68,7 @@ The main deployment instructions below use the simple **Wrangler command-line ro
 
 1. A Windows 10/11, macOS or Linux computer.
 2. Node.js **22, 23 or 24** and npm **10 or later**. Node 24 is the project recommendation (`.nvmrc` contains `24`).
-3. A Cloudflare account with permission to create and manage Pages, D1 and Cloudflare Access resources.
+3. A Cloudflare account with permission to create and manage Pages and D1 resources (and R2 if uploads are needed).
 4. Access to the campaign's approved text, images, logo, contact details and social URLs.
 
 ### Optional, depending on features you want
@@ -150,7 +151,7 @@ If it fails, copy the first error message and resolve it before moving on. Commo
 | --- | --- |
 | `.dev.vars` | Create only for local development. It is ignored by Git. Never upload it. |
 | `wrangler.local.toml` | Checked-in local-only D1 configuration used by `npm run db:local`; `npm run cf:local` uses the matching local binding. It never connects to campaign resources. |
-| `wrangler.toml` | Create from `wrangler.example.toml` after you create Cloudflare resources. It may contain resource IDs but must contain no secret values. |
+| `wrangler.toml` | This repository already includes the live-project configuration. Verify the resource IDs belong to the intended Cloudflare account; do not copy the example file over it. It may contain resource IDs but must contain no secret values. |
 | `workers/wrangler.toml` | Only edit if you enable scheduled Facebook sync. Replace its D1 placeholder before deploying that Worker. |
 | `database/schema.sql` | Use only for a brand-new D1 database. Do not manually edit live data here. |
 | `database/migrations/*.sql` | Use for an existing live database, after a backup. |
@@ -275,31 +276,15 @@ R2 enables protected image and audio uploads in the content studio. You can depl
 
 ### Step 7.4 — Create your Cloudflare configuration file
 
-The real `wrangler.toml` is intentionally not supplied because it must use your resource ID.
+This repository already includes `wrangler.toml` for the configured Pages project. **Do not copy `wrangler.example.toml` over it**—that would erase the known database and bucket bindings.
 
-In PowerShell:
+1. Open `wrangler.toml` in a text editor.
+2. Run `npx wrangler d1 list` and compare the listed `sodangi-cms` ID with the `database_id` in `wrangler.toml`.
+3. Run `npx wrangler r2 bucket list` and confirm that `sodangi-media` is the intended upload bucket.
+4. Confirm that `SITE_ORIGIN` exactly matches the public Pages URL, for example `https://sodangi-2027.pages.dev`.
+5. Change a value only if you have deliberately created a different campaign resource in the correct Cloudflare account. Keep the binding names exactly `DB` and `MEDIA`.
 
-```powershell
-Copy-Item .\wrangler.example.toml .\wrangler.toml
-notepad .\wrangler.toml
-```
-
-On macOS/Linux:
-
-```bash
-cp wrangler.example.toml wrangler.toml
-nano wrangler.toml
-```
-
-Replace these placeholders:
-
-| Placeholder or setting | What to enter |
-| --- | --- |
-| `REPLACE_WITH_YOUR_D1_DATABASE_ID` | The exact ID printed in step 7.2. |
-| `YOUR-PROJECT.pages.dev` | Your Pages hostname after step 7.5, for example `sodangi-2027.pages.dev`. |
-| `name`, `database_name`, `bucket_name` | Change only if you chose different resource names. Keep the `DB` and `MEDIA` binding names unchanged. |
-
-Leave `ENVIRONMENT = "production"` in `wrangler.toml`. Do not add `LOCAL_ADMIN_TOKEN`, Meta tokens, Brevo keys or Cloudflare API tokens to this file.
+Leave `ENVIRONMENT = "production"` in `wrangler.toml`. Do not add `LOCAL_ADMIN_TOKEN`, administrator passwords, Meta tokens, Brevo keys or Cloudflare API tokens to this file.
 
 ### Step 7.5 — Create the Pages project
 
@@ -315,16 +300,27 @@ If you used another project name, use it instead. Cloudflare will reserve a Page
 
 Complete this section before anyone uses the content studio. The public homepage should remain public; only the private administration screen and its API need sign-in.
 
-> **Do not skip this section.** Hiding `/admin` from the menu does not secure it. The application rejects unauthenticated edit requests, but Cloudflare Access is the sign-in gate that decides which people can become administrators.
+> **Do not skip this section.** Hiding `/admin` from the menu does not secure it. The application rejects unauthenticated edit requests, but you must choose and complete one protected production sign-in route below.
 
-### Step 8.0 — Prepare before changing Access
+### Step 8.0 — Choose one protected sign-in route
+
+Choose **one** option before changing variables. Both keep the public homepage public and protect the content-changing API. Do not enable both routes at the same time.
+
+| Choose this when… | Use this route | What it gives you |
+| --- | --- | --- |
+| More than one editor needs access, or you need named identities and MFA. | **Cloudflare Access** — complete steps 8.1–8.10. | A separate signed-in account per editor and a meaningful audit identity. This remains the recommended production choice for a team. |
+| One trusted owner manages all content and wants a simpler `/admin` password screen instead of Zero Trust policies. | **Built-in password sign-in** — complete steps 8.1–8.3 and 8.3A, then skip steps 8.4–8.10. | A dedicated password page backed by a server-only Cloudflare secret, an 8-hour secure session, CSRF protection and login throttling. |
+
+Password mode is not an open or public admin page. It still needs the Pages project, D1 database, a database migration and three Cloudflare secrets. It is less suitable than Access for a team because its audit trail identifies the shared account as `password-admin`, not an individual person.
+
+### Step 8.1 — Prepare before changing your sign-in route
 
 1. Confirm that the public Pages site has a working hostname, such as `https://sodangi-2027.pages.dev` or the approved campaign domain.
-2. Keep one Cloudflare account owner outside the editor allowlist as a **break-glass administrator**. That person must be able to open the Cloudflare dashboard and undo an Access mistake.
+2. Keep one Cloudflare account owner as a **break-glass administrator**. That person must be able to open the Cloudflare dashboard and undo a Pages variable or Access mistake.
 3. Write down every hostname that can reach the site. Examples: the Pages hostname, `www.example.org`, `example.org`, and any alternate domain. Each reachable hostname must be tested later.
-4. Decide which identity provider editors will use—typically Google, Microsoft, an organisation SSO provider, or email one-time PIN. Do not invite editors until the policy is saved and tested.
+4. If you chose Access, decide which identity provider editors will use—typically Google, Microsoft, an organisation SSO provider, or email one-time PIN. Do not invite editors until the policy is saved and tested.
 
-### Step 8.1 — Confirm the resource bindings
+### Step 8.2 — Confirm the resource bindings
 
 In the Cloudflare dashboard, open **Workers & Pages → sodangi-2027 → Settings**. Locate the bindings/resources area and confirm or add:
 
@@ -335,7 +331,7 @@ In the Cloudflare dashboard, open **Workers & Pages → sodangi-2027 → Setting
 
 The names must be exactly `DB` and `MEDIA`, because those are the names used by the application. If you use command-line deployment, `wrangler.toml` also declares the same bindings. Do not create conflicting bindings with different resource names in the dashboard. After adding or changing a binding in the dashboard, create a fresh deployment before testing it.
 
-### Step 8.2 — Set basic production variables and any services you have already chosen
+### Step 8.3 — Set basic production variables and any services you have already chosen
 
 Open **Workers & Pages → sodangi-2027 → Settings → Variables and Secrets**. Set the production values below. Dashboard wording changes occasionally; look for a production environment selector and variables/secrets section.
 
@@ -343,8 +339,8 @@ Open **Workers & Pages → sodangi-2027 → Settings → Variables and Secrets**
 | --- | --- | --- | --- |
 | `ENVIRONMENT` | `production` | Yes | No |
 | `SITE_ORIGIN` | Exact public origin, e.g. `https://sodangi-2027.pages.dev` | Yes | No |
-| `ACCESS_TEAM_DOMAIN` | Your Zero Trust team hostname, e.g. `campaign.cloudflareaccess.com` | Yes, after step 8.3 | No |
-| `ACCESS_AUD` | The exact Application Audience (AUD) Tag from the Access application | Yes, after step 8.4 | No |
+| `ACCESS_TEAM_DOMAIN` | Your Zero Trust team hostname, e.g. `campaign.cloudflareaccess.com` | Only for the Access route | No |
+| `ACCESS_AUD` | The exact Application Audience (AUD) Tag from the Access application | Only for the Access route | No |
 | `BREVO_API_KEY` | Brevo API key | Only for newsletter | **Yes** |
 | `BREVO_LIST_ID` | Confirmed-subscriber list ID | Only for newsletter | Prefer secret/config |
 | `MAIL_FROM` | Verified sender email | Only for newsletter | No |
@@ -352,7 +348,7 @@ Open **Workers & Pages → sodangi-2027 → Settings → Variables and Secrets**
 
 For a Wrangler CLI deployment, the matching non-secret `ENVIRONMENT` and `SITE_ORIGIN` values in `wrangler.toml` are part of the deployment configuration. For a Git-integrated project, enter the same values in the dashboard. If both places are used, keep them identical; conflicting values make problems hard to diagnose.
 
-Leave `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` blank until you create the Access application in steps 8.3–8.7; step 8.7 shows exactly where to copy them from. Leave newsletter and Facebook values unset until you intentionally enable those services.
+Leave `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` blank until you create the Access application in steps 8.4–8.8; step 8.8 shows exactly where to copy them from. If you chose password mode, leave both blank. Leave newsletter and Facebook values unset until you intentionally enable those services.
 
 Never add `LOCAL_ADMIN_TOKEN` to a production environment. Never put a secret in a variable beginning `VITE_`; Vite exposes those values to browser code.
 
@@ -364,7 +360,66 @@ npx wrangler pages secret put FB_PAGE_ACCESS_TOKEN --project-name sodangi-2027
 
 Wrangler prompts for the value. Paste it only into that prompt, then press Enter. Do not append it to the command line or save it in a shell history file.
 
-### Step 8.3 — Create or open your Cloudflare Zero Trust team
+### Step 8.3A — Use the built-in password sign-in (one trusted owner)
+
+Follow this route only if one trusted owner will operate the dashboard and you deliberately do **not** want to create Cloudflare Access policies. It removes the Zero Trust policy work; it does not make `/admin` public.
+
+1. **Apply the small database migration first.** From the project root, run:
+
+   ```powershell
+   npx wrangler d1 execute sodangi-cms --remote --file=./database/migrations/20261121_password_admin.sql
+   ```
+
+   Wait for Wrangler to report success. This adds only the hashed session and login-throttle tables. It does not change homepage content.
+
+2. **Create a strong administrator password privately.** Use a password manager to generate a unique password of at least 16 characters. Do not reuse a personal, email, Facebook or Cloudflare password.
+
+3. **Store that password as a Pages secret.** Run this command, wait for the prompt, then paste the password only into the prompt:
+
+   ```powershell
+   npx wrangler pages secret put ADMIN_PASSWORD --project-name sodangi-2027
+   ```
+
+   Press Enter. Do not put the password in `.dev.vars`, `wrangler.toml`, Git, a screenshot or this guide.
+
+4. **Create a separate session secret.** This value is not the administrator password. The following PowerShell commands generate 48 random bytes and send them directly to Wrangler without printing the value:
+
+   ```powershell
+   $bytes = New-Object byte[] 48
+   $rng = New-Object System.Security.Cryptography.RNGCryptoServiceProvider
+   $rng.GetBytes($bytes)
+   [Convert]::ToBase64String($bytes) | npx wrangler pages secret put ADMIN_SESSION_SECRET --project-name sodangi-2027
+   $rng.Dispose()
+   Remove-Variable bytes,rng
+   ```
+
+   If Wrangler instead asks for a value, generate a different 32+-character random value in your password manager and paste it at that prompt. Never use the administrator password again as the session secret.
+
+5. **Turn on password mode only after both secrets are stored.** Run:
+
+   ```powershell
+   npx wrangler pages secret put ADMIN_AUTH_MODE --project-name sodangi-2027
+   ```
+
+   At the prompt, type exactly:
+
+   ```text
+   password
+   ```
+
+   The exact lower-case word matters. Do not set this value first: an enabled mode without the other two secrets correctly fails closed and no one can sign in.
+
+6. **Create a fresh production deployment.** Follow section 10 after the current code and migration are in place. A Git-connected Pages project can use the next push to `main`; otherwise run the deployment command in section 10. Wait until Pages shows the deployment as successful.
+
+7. **Test it in a private browser window.** Open `https://YOUR-SITE/admin`. You should see an administrator-password form. Enter the password once. The dashboard should load and the public homepage must remain public.
+
+8. **Test sign-out.** Use **Sign out** in the dashboard sidebar, then reload `/admin`. The password form must return. The browser session expires after eight hours even if you forget to sign out.
+
+9. **Keep the password route limited.** Anyone with this shared password has full edit access and appears in the audit trail as `password-admin`. If you later add editors, need MFA, or need to know who made each change, switch to the Access route below instead.
+
+Password mode uses a `Secure`, `HttpOnly`, `SameSite=Strict` browser cookie, a server-side D1 session, a per-session CSRF token, and a five-failure/15-minute login throttle. It is intended for the HTTPS production site. Continue using `LOCAL_ADMIN_TOKEN` only for localhost development.
+
+### Step 8.4 — Create or open your Cloudflare Zero Trust team
 
 1. Sign in to the Cloudflare dashboard with the campaign-owned account.
 2. Open **Zero Trust**. If Cloudflare asks you to create a team, complete that short setup.
@@ -377,23 +432,23 @@ Wrangler prompts for the value. Paste it only into that prompt, then press Enter
 4. Save the team domain somewhere private. Later, this exact hostname—without `https://`, a path or a trailing slash—becomes `ACCESS_TEAM_DOMAIN`.
 5. In Zero Trust, open **Settings → Authentication** (or **Authentication → Login methods**, if the dashboard uses that wording). Enable the sign-in method your editors will use. A small team can use email one-time PIN; an organisation can use its approved Google, Microsoft or SSO provider.
 
-Do not use a shared campaign password. Each editor needs their own identity so the Access policy and CMS audit trail remain meaningful.
+For the Access route, do not use a shared campaign password. Each editor needs their own identity so the Access policy and CMS audit trail remain meaningful.
 
-### Step 8.4 — Choose the correct Access setup for your hostname
+### Step 8.5 — Choose the correct Access setup for your hostname
 
-Cloudflare handles a Pages-provided `*.pages.dev` hostname differently from a campaign-owned custom domain. Choose the row that matches the URL you will give to administrators.
+This is the Access route. Cloudflare handles a Pages-provided `*.pages.dev` hostname differently from a campaign-owned custom domain. Choose the row that matches the URL you will give to administrators.
 
 | Administrator URL | Where to begin | Important note |
 | --- | --- | --- |
-| `https://YOUR-PROJECT.pages.dev/admin` | **Workers & Pages → your project → Settings → General → Enable access policy** | Pages' built-in switch protects preview deployments first. Use **Manage** on the generated policy, then configure the production Pages hostname and the paths in step 8.5. |
-| `https://www.example.org/admin` or another campaign-owned domain | **Zero Trust → Access controls → Applications → Create new application → Self-hosted and private** | Select **Add public hostname**, then choose the campaign domain and add the paths in step 8.5. |
+| `https://YOUR-PROJECT.pages.dev/admin` | **Workers & Pages → your project → Settings → General → Enable access policy** | Pages' built-in switch protects preview deployments first. Use **Manage** on the generated policy, then configure the production Pages hostname and the paths in step 8.6. |
+| `https://www.example.org/admin` or another campaign-owned domain | **Zero Trust → Access controls → Applications → Create new application → Self-hosted and private** | Select **Add public hostname**, then choose the campaign domain and add the paths in step 8.6. |
 | A preview address such as `HASH.YOUR-PROJECT.pages.dev/admin` | Treat as a separate preview-security task | Preview URLs are public by default and can receive a separate Access application/AUD. Do not use the admin studio from previews until it has been deliberately configured and tested. |
 
 For a `pages.dev` production URL, Cloudflare's Pages flow may first create an application using a wildcard subdomain for previews. Select **Manage**, open the project application under **Zero Trust → Access controls → Applications**, choose **Configure**, and remove the wildcard when Cloudflare instructs you to target the exact production subdomain. Return to Pages settings and re-enable preview access only if you also need protected previews.
 
 > **Keep the public site public:** do not protect the empty path, the site root, or `/*` unless you intentionally want every visitor to sign in. This project needs only the three administration destinations below.
 
-### Step 8.5 — Add the exact protected paths
+### Step 8.6 — Add the exact protected paths
 
 Create **one Access application** for the administration experience, then add these destinations to that same application for each administrator hostname:
 
@@ -417,7 +472,7 @@ Use one application wherever Cloudflare permits multiple destinations, because o
 
 If the Pages/Access interface does not let you put the required production hostname and paths into one consistent application, stop and ask the Cloudflare account owner or technical administrator to resolve it before sharing `/admin`. Do not solve this by protecting the entire public website or by weakening the API checks.
 
-### Step 8.6 — Create a least-privilege editor policy
+### Step 8.7 — Create a least-privilege editor policy
 
 While creating or editing the application, choose **Add a policy** or **Create new policy** and use these settings:
 
@@ -434,7 +489,7 @@ While creating or editing the application, choose **Add a policy** or **Create n
 
 Cloudflare Access is deny-by-default: only people who match this Allow policy can obtain the token that the API accepts. This project currently treats every successfully authorised editor as a full administrator, so keep the list small and reviewed.
 
-### Step 8.7 — Copy the two values the website needs
+### Step 8.8 — Copy the two values the website needs
 
 After saving the Access application:
 
@@ -455,7 +510,7 @@ After saving the Access application:
 
 The application validates the Access JWT header against Cloudflare's signing keys, the team domain, the expected AUD tag and the RS256 algorithm. A mistyped team domain, stale AUD tag, missing token or wrong application therefore fails closed with `401`.
 
-### Step 8.8 — Test before telling anyone the admin URL
+### Step 8.9 — Test the Access route before telling anyone the admin URL
 
 Perform all four tests. Do not rely only on a successful login from the Cloudflare account owner.
 
@@ -474,7 +529,7 @@ Perform all four tests. Do not rely only on a successful login from the Cloudfla
 
 Repeat the unauthorised and allowed-editor tests for every reachable hostname, including `pages.dev`, the custom domain, `www`, and aliases. Access rules are hostname-specific.
 
-### Step 8.9 — Protect previews and recover safely
+### Step 8.10 — Protect Access previews and recover safely
 
 - Pages preview URLs are separate from the production hostname and are public by default. In **Workers & Pages → project → Settings → General**, enable the preview access policy if previews contain sensitive work.
 - A preview policy may have a different Audience tag. Until the application has been deliberately configured to accept that audience, do not use `/admin` on a preview URL; edit content only on the tested production hostname.
@@ -519,12 +574,13 @@ Use this path if the previous site contains real content, administrators or subs
    ```powershell
    npx wrangler d1 execute sodangi-cms --remote --file=./database/migrations/20261117_bilingual_content.sql
    npx wrangler d1 execute sodangi-cms --remote --file=./database/migrations/20261118_facebook_integration.sql
+    npx wrangler d1 execute sodangi-cms --remote --file=./database/migrations/20261121_password_admin.sql
    ```
 
 3. Do **not** delete the old database and do **not** import `database/schema.sql` as a replacement for it.
 4. Only deploy the updated code after both migration commands report success.
 
-The first migration adds Hausa editorial translations. The second creates Facebook integration settings and changes only two unchanged starter-card image paths to smaller campaign images. Both are written to be safe to re-run.
+The first migration adds Hausa editorial translations. The second creates Facebook integration settings and changes only two unchanged starter-card image paths to smaller campaign images. The third adds the password-mode session and login-throttle tables; it is safe to apply even when you continue to use Access. All three are written to be safe to re-run.
 
 ## 10. Deploy the website
 
@@ -551,7 +607,7 @@ The first migration adds Hausa editorial translations. The second creates Facebo
 
 3. Wait for Wrangler to print the deployment URL. Open it in a browser.
 4. Visit `/api/site`. You should see JSON describing the public website data.
-5. In a private browser window, test `/admin` as described in section 8.3 before sharing the site URL with editors.
+5. In a private browser window, test `/admin` using the matching sign-in test in section 8.3A (password mode) or step 8.9 (Access) before sharing the site URL with editors.
 
 The `functions/` directory contains the server-side Pages Functions. Deploy from the project root; do not use a basic drag-and-drop static upload, because it may omit the application API.
 
@@ -562,7 +618,7 @@ Set this up only after the first CLI deployment succeeds.
 1. Create a private GitHub repository and push this project. Do not include `.dev.vars`, `.env`, build output, backups or secrets.
 2. In Cloudflare Pages, create or connect a Git-integrated project using that repository.
 3. Set build command to `npm run build`, output directory to `dist`, production branch to `main`, and root directory to the project root.
-4. Re-create the same bindings, variables, secrets and Access settings in the Pages project configuration.
+4. Re-create the same bindings, variables, secrets and selected admin sign-in settings in the Pages project configuration.
 5. Push a small documentation-only change and confirm that Cloudflare creates a preview deployment before relying on it for production.
 
 The included GitHub workflow runs `npm run check` on pull requests and `main` pushes. It validates code; it does **not** deploy the site or manage Cloudflare secrets.
@@ -571,7 +627,7 @@ The included GitHub workflow runs `npm run check` on pull requests and `main` pu
 
 ### Step 11.1 — Sign in safely
 
-Open `https://YOUR-SITE/admin` in a browser. Cloudflare Access should sign in an allowed editor. In production, do not enter a local token anywhere; the local-token option is intentionally for localhost development only.
+Open `https://YOUR-SITE/admin` in a browser. If you chose Access, Cloudflare should sign in an allowed editor. If you chose password mode, enter the administrator password on the dedicated sign-in screen. In production, do not enter a local token anywhere; the local-token option is intentionally for localhost development only.
 
 ### Step 11.2 — Check the Overview first
 
@@ -601,7 +657,7 @@ Published items appear on the public website. Drafts do not. Deleting an item is
 
 ### Step 11.5 — Review Operations
 
-The **Operations** tab is a quick reminder about Access protection, editorial review, launch testing and backups. It is not a substitute for the deployment and security steps in this guide.
+The **Operations** tab is a quick reminder about the selected sign-in protection, editorial review, launch testing and backups. It is not a substitute for the deployment and security steps in this guide.
 
 ## 12. Optional services
 
@@ -627,7 +683,7 @@ This integration is optional. It imports up to the latest 25 eligible Page feed 
 1. Confirm that the campaign owns or is authorised to manage the official Facebook Page.
 2. Obtain a **Page access token** through a campaign-controlled Meta developer app. Do not use a personal token.
 3. Confirm Meta's current permissions and any required app review. At the time of writing, managed-Page reads commonly require `pages_read_engagement` and `pages_read_user_content`; public Page access has different requirements. Meta can change these rules.
-4. Ensure the Pages site is deployed, its `/admin` route is protected by Access, and the D1 database is prepared using section 9.
+4. Ensure the Pages site is deployed, its `/admin` route is protected by the sign-in route selected in section 8, and the D1 database is prepared using section 9.
 
 #### Configure the Pages application
 
@@ -637,7 +693,7 @@ This integration is optional. It imports up to the latest 25 eligible Page feed 
    npx wrangler pages secret put FB_PAGE_ACCESS_TOKEN --project-name sodangi-2027
    ```
 
-2. Open **Admin → Integrations** after Access sign-in.
+2. Open **Admin → Integrations** after signing in through the route selected in section 8.
 3. Enable the Facebook feed, enter the official numeric Page ID and `https://` Page URL, then choose a sync frequency.
 4. Leave **Publish imported posts automatically** off for the first import.
 5. Select **Save integration**, then **Sync now**.
@@ -681,7 +737,7 @@ Do this after the Pages hostname works correctly.
 3. Wait until Cloudflare reports that HTTPS is active.
 4. Change `SITE_ORIGIN` to the final canonical URL, for example `https://www.example.org`.
 5. Create a fresh deployment.
-6. Add the custom hostname and `/admin`, `/admin/*`, `/api/admin/*` paths to the same Cloudflare Access protection from section 8.3.
+6. If you use Cloudflare Access, add the custom hostname and `/admin`, `/admin/*`, `/api/admin/*` paths to the same Access application from step 8.6. Password mode uses the same site-origin cookie on the custom hostname, so test sign-in there after the domain becomes active.
 7. Test both the custom hostname and the original `pages.dev` hostname. Redirect or protect every reachable hostname so one cannot bypass your intended policy.
 
 Do not publish a domain that is still showing an old site, an invalid certificate or an unprotected admin route.
@@ -695,9 +751,10 @@ Complete this checklist with a named editor and a non-editor. Do not tick an ite
 - [ ] `npm ci` and `npm run check` succeed on the computer used for deployment.
 - [ ] The public URL loads over HTTPS and `/api/site` returns current JSON.
 - [ ] `ENVIRONMENT=production` is set for production.
-- [ ] A private/incognito browser without an allowed account cannot access `/admin` or `/api/admin/*`.
-- [ ] An allowed editor can sign in through Cloudflare Access and save a harmless test field.
+- [ ] A private/incognito browser without a valid sign-in cannot access editable CMS data.
+- [ ] An Access editor, or the single password-mode owner, can sign in and save a harmless test field.
 - [ ] `LOCAL_ADMIN_TOKEN` is absent from production settings.
+- [ ] If password mode is used, `ADMIN_PASSWORD` and `ADMIN_SESSION_SECRET` are Cloudflare secrets, not repository files, and sign-out returns to the password form.
 - [ ] R2 upload is tested, or the studio clearly says media storage is not configured.
 - [ ] No secret appears in the repository, `wrangler.toml`, screenshots, public issue tracker or frontend bundle.
 
@@ -715,7 +772,7 @@ Complete this checklist with a named editor and a non-editor. Do not tick an ite
 
 - [ ] Newsletter test delivery, confirmation and unsubscribe handling have been checked—or the form correctly reports unavailable.
 - [ ] Facebook sync is disabled, or its token, Page ID, Page URL and first imports have been reviewed. Automatic publishing remains off until explicitly approved.
-- [ ] Custom domain, HTTPS, `SITE_ORIGIN` and Access rules agree on the same canonical hostname.
+- [ ] Custom domain, HTTPS and `SITE_ORIGIN` agree on the same canonical hostname; Access paths are updated if Access is the selected route.
 
 ## 15. Operate, back up and recover
 
@@ -759,14 +816,14 @@ If a secret was exposed, do not merely redeploy: revoke/rotate it with the provi
 | `/api/site` returns 503 locally | Pages Functions did not receive the local D1 binding, or the local database was not seeded | Stop the server, run `npm run db:local`, then use `npm run cf:local` exactly. Do not substitute a manual `wrangler pages dev dist` command. |
 | `wrangler` says you are not authorised | Wrong Cloudflare login/account | Run `npx wrangler whoami`; then `npx wrangler logout` and `npx wrangler login` if necessary. |
 | D1 command cannot find `sodangi-cms` | The database has another name or is in another account | Confirm the name in Cloudflare Dashboard/D1. Use that exact name in the command and configuration. |
-| Public site works but admin says authentication is required | Access is missing/misconfigured, or the Pages variables are wrong | Check Access paths, named-user policy, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` and `ENVIRONMENT=production`. Test in an incognito browser. |
+| Public site works but admin says authentication is required | The selected sign-in route is incomplete or Pages variables are wrong | For Access, check the paths, named-user policy, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` and `ENVIRONMENT=production`. For password mode, confirm the migration succeeded and `ADMIN_PASSWORD`, `ADMIN_SESSION_SECRET` and lower-case `ADMIN_AUTH_MODE=password` are stored as Pages secrets, then redeploy. Test in an incognito browser. |
 | Upload fails | R2 is not created/bound, file is too large, or file type is unsupported | Confirm `MEDIA` is bound to the intended R2 bucket. Use JPG/PNG/WebP/AVIF images under 10 MB or licensed audio under 20 MB. |
 | Newsletter says unavailable | One or more Brevo settings are missing | Verify `BREVO_API_KEY`, `BREVO_LIST_ID`, `MAIL_FROM`, sender verification and `SITE_ORIGIN`. Then deploy again and send a test. |
 | Facebook panel says token not configured | The Pages secret is missing or was set for another project | Run the interactive Pages secret command again for the correct project, then refresh the protected admin page. |
 | Facebook manual sync fails | Token expired, Page permissions are missing, Page ID is wrong, or Meta app review is incomplete | Check the Page token in Meta, current permissions, numeric Page ID and Worker/Pages logs. Do not paste the token into the dashboard. |
 | Scheduled Facebook sync never runs | Worker not deployed, placeholder D1 ID remains, or Worker secret is missing | Check `workers/wrangler.toml`, deploy the Worker, set its separate secret, then inspect Worker logs. |
 | Refreshing a public route gives a 404 | Deployment is missing the SPA fallback | Confirm `public/_redirects` was included in `dist` and redeploy from the project root. |
-| A custom domain bypasses Access | Access only protects the Pages hostname or another alias remains public | Add every hostname and protected path to the Access application, then test each hostname in incognito mode. |
+| A custom domain bypasses Access | Access only protects the Pages hostname or another alias remains public | Add every hostname and protected path to the Access application, then test each hostname in incognito mode. This row applies only when you selected Access. |
 
 ## Official references
 

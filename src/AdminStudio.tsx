@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -32,6 +32,8 @@ import { ensureTranslations, type Lang } from './i18n';
 type Notice = { tone: 'success' | 'error'; text: string } | null;
 type Tab = 'overview' | 'site' | 'entries' | 'integrations' | 'operations';
 type Path = Array<string | number>;
+type AdminAuthMode = 'access' | 'password';
+type AdminAuthConfig = { mode: AdminAuthMode; passwordConfigured: boolean };
 
 type FacebookConfig = {
   enabled: boolean;
@@ -439,6 +441,11 @@ function FacebookIntegration({ api, showNotice, refreshContent }: FacebookIntegr
 export function AdminStudio({ go }: { go: (path: string) => void }) {
   const [token, setToken] = useState(() => sessionStorage.getItem('sodangi-local-token') ?? '');
   const [localToken, setLocalToken] = useState('');
+  const [authMode, setAuthMode] = useState<AdminAuthMode>('access');
+  const [passwordConfigured, setPasswordConfigured] = useState(false);
+  const [password, setPassword] = useState('');
+  const [signingIn, setSigningIn] = useState(false);
+  const csrfToken = useRef('');
   const [site, setSite] = useState<SiteData | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [status, setStatus] = useState<any>(null);
@@ -453,40 +460,134 @@ export function AdminStudio({ go }: { go: (path: string) => void }) {
   const api = useCallback(async (url: string, options: RequestInit = {}) => {
     const requestHeaders = new Headers(options.headers);
     Object.entries(headers()).forEach(([key, value]) => requestHeaders.set(key, value));
-    if (!(options.body instanceof FormData) && !requestHeaders.has('content-type')) requestHeaders.set('content-type', 'application/json');
+    const method = (options.method || 'GET').toUpperCase();
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && csrfToken.current) requestHeaders.set('X-Admin-CSRF', csrfToken.current);
+    if (options.body && !(options.body instanceof FormData) && !requestHeaders.has('content-type')) requestHeaders.set('content-type', 'application/json');
     const response = await fetch(url, {
       ...options,
       headers: requestHeaders,
+      credentials: 'same-origin',
     });
     const data = await response.json().catch(() => ({ error: 'Unexpected server response' }));
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
     return data;
   }, [headers]);
 
+  const readAuthConfig = useCallback(async (): Promise<AdminAuthConfig> => {
+    const data = await api('/api/admin/auth/config');
+    return { mode: data?.mode === 'password' ? 'password' : 'access', passwordConfigured: data?.passwordConfigured === true };
+  }, [api]);
+
+  const checkPasswordSession = useCallback(async () => {
+    const data = await api('/api/admin/auth/session');
+    if (data?.authenticated === true && typeof data.csrfToken === 'string') {
+      csrfToken.current = data.csrfToken;
+      return true;
+    }
+    csrfToken.current = '';
+    return false;
+  }, [api]);
+
+  const loadDashboard = useCallback(async () => {
+    const [siteResponse, contentResponse, statusResponse] = await Promise.all([
+      api('/api/admin/site'),
+      api('/api/admin/content'),
+      api('/api/admin/status'),
+    ]);
+    setSite(ensureTranslations(siteResponse.site));
+    setEntries(contentResponse.entries ?? []);
+    setStatus(statusResponse);
+    setDirty(false);
+  }, [api]);
+
   const load = useCallback(async () => {
     setChecking(true);
     setAuthError('');
     try {
-      const [siteResponse, contentResponse, statusResponse] = await Promise.all([
-        api('/api/admin/site'),
-        api('/api/admin/content'),
-        api('/api/admin/status'),
-      ]);
-      setSite(ensureTranslations(siteResponse.site));
-      setEntries(contentResponse.entries ?? []);
-      setStatus(statusResponse);
-      setDirty(false);
+      const config = await readAuthConfig();
+      setAuthMode(config.mode);
+      setPasswordConfigured(config.passwordConfigured);
+      if (config.mode === 'password') {
+        if (!config.passwordConfigured) {
+          setSite(null);
+          setAuthError('Password sign-in has not been configured on this deployment yet.');
+          return;
+        }
+        const signedIn = await checkPasswordSession();
+        if (!signedIn) {
+          // A loopback-only local token remains useful while developing, even
+          // when password mode has been enabled for production.
+          if (token) {
+            try {
+              await loadDashboard();
+              return;
+            } catch {
+              // The screen below explains the appropriate production sign-in.
+            }
+          }
+          setSite(null);
+          return;
+        }
+      } else {
+        csrfToken.current = '';
+      }
+      await loadDashboard();
     } catch (error) {
       setSite(null);
       setAuthError(error instanceof Error ? error.message : 'Secure administrator access could not be verified.');
     } finally {
       setChecking(false);
     }
-  }, [api]);
+  }, [checkPasswordSession, loadDashboard, readAuthConfig, token]);
 
   useEffect(() => { void load(); }, [load]);
 
   const showNotice = (next: Notice) => setNotice(next);
+  const signInWithPassword = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSigningIn(true);
+    setAuthError('');
+    try {
+      const response = await fetch('/api/admin/auth/login', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      const data = await response.json().catch(() => ({ error: 'Unexpected server response' }));
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      if (typeof data.csrfToken !== 'string') throw new Error('Secure sign-in could not be completed.');
+      csrfToken.current = data.csrfToken;
+      setPassword('');
+      await loadDashboard();
+    } catch (error) {
+      setSite(null);
+      setAuthError(error instanceof Error ? error.message : 'Secure sign-in could not be completed.');
+    } finally {
+      setSigningIn(false);
+    }
+  };
+  const signOut = async () => {
+    if (authMode !== 'password') {
+      sessionStorage.removeItem('sodangi-local-token');
+      setToken('');
+      window.location.reload();
+      return;
+    }
+    try {
+      const response = await fetch('/api/admin/auth/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'X-Admin-CSRF': csrfToken.current },
+      });
+      const data = await response.json().catch(() => ({ error: 'Unexpected server response' }));
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      csrfToken.current = '';
+      window.location.reload();
+    } catch (error) {
+      showNotice({ tone: 'error', text: error instanceof Error ? error.message : 'Could not sign out safely.' });
+    }
+  };
   const upload = async (file: File): Promise<string | null> => {
     try {
       const body = new FormData();
@@ -518,7 +619,7 @@ export function AdminStudio({ go }: { go: (path: string) => void }) {
   };
 
   if (checking) return <div className="studio-loading-screen"><RefreshCw className="studio-spin" size={30} /><h1>Checking secure admin access…</h1></div>;
-  if (!site) return <div className="studio-lock-screen"><section className="studio-lock-card"><LockKeyhole size={38} /><p className="studio-overline">Private content studio</p><h1>Administrator sign-in required</h1><p>{authError}</p><p>In production, access is granted by Cloudflare Access. This screen never accepts a production password.</p><button type="button" className="studio-primary" onClick={() => void load()}><RefreshCw size={16} />Retry secure sign-in</button><details><summary>Developing locally with Wrangler?</summary><p>Enter the local development token configured in <code>.dev.vars</code>. It is rejected in production.</p><input type="password" placeholder="Local development token" value={localToken} onChange={(event) => setLocalToken(event.target.value)} /><button type="button" className="studio-secondary" onClick={() => { sessionStorage.setItem('sodangi-local-token', localToken); setToken(localToken); }}>Use local token</button></details><button type="button" className="studio-text-button" onClick={() => go('/')}>Return to public website</button></section></div>;
+  if (!site) return <div className="studio-lock-screen"><section className="studio-lock-card"><LockKeyhole size={38} /><p className="studio-overline">Private content studio</p><h1>Administrator sign-in required</h1>{authMode === 'password' ? <>{passwordConfigured ? <><p>Use the administrator password stored as a Cloudflare secret. It is never saved in this browser.</p>{authError && <p className="studio-error-text"><AlertCircle size={16} />{authError}</p>}<form className="studio-password-form" onSubmit={(event) => void signInWithPassword(event)}><label>Administrator password<input type="password" autoComplete="current-password" minLength={16} maxLength={1024} required value={password} onChange={(event) => setPassword(event.target.value)} /></label><button type="submit" className="studio-primary" disabled={signingIn || !password}>{signingIn ? <RefreshCw className="studio-spin" size={16} /> : <LockKeyhole size={16} />}{signingIn ? 'Signing in…' : 'Sign in securely'}</button></form><button type="button" className="studio-text-button" onClick={() => void load()}><RefreshCw size={16} />Check sign-in again</button></> : <><p>Password sign-in is selected but is not ready. The database migration and three Cloudflare secrets must be completed before anyone can use this dashboard.</p>{authError && <p className="studio-error-text"><AlertCircle size={16} />{authError}</p>}<button type="button" className="studio-primary" onClick={() => void load()}><RefreshCw size={16} />Check configuration again</button></>}</> : <><p>Cloudflare Access controls this production sign-in. Sign in with an approved editor account, then retry.</p>{authError && <p className="studio-error-text"><AlertCircle size={16} />{authError}</p>}<button type="button" className="studio-primary" onClick={() => void load()}><RefreshCw size={16} />Retry secure sign-in</button></>}<details><summary>Developing locally with Wrangler?</summary><p>Enter the local development token configured in root <code>.dev.vars</code>. It is rejected on public deployments.</p><input type="password" autoComplete="off" placeholder="Local development token" value={localToken} onChange={(event) => setLocalToken(event.target.value)} /><button type="button" className="studio-secondary" disabled={!localToken} onClick={() => { sessionStorage.setItem('sodangi-local-token', localToken); setToken(localToken); }}>Use local token</button></details><button type="button" className="studio-text-button" onClick={() => go('/')}>Return to public website</button></section></div>;
 
   const navigation: Array<[Tab, string, typeof LayoutDashboard]> = [
     ['overview', 'Overview', LayoutDashboard],
@@ -531,11 +632,11 @@ export function AdminStudio({ go }: { go: (path: string) => void }) {
   const published = entries.filter((entry) => entry.status === 'published').length;
   const drafts = entries.filter((entry) => entry.status === 'draft').length;
 
-  return <div className="studio-app"><aside className="studio-sidebar"><div className="studio-brand"><img src="/assets/logo.jpg" alt="Sodangi logo" /><span>CONTENT STUDIO<small>PRIVATE ADMINISTRATION</small></span></div><nav aria-label="Admin dashboard sections">{navigation.map(([key, label, Icon]) => <button type="button" key={key} className={tab === key ? 'selected' : ''} aria-current={tab === key ? 'page' : undefined} onClick={() => { setTab(key); setNotice(null); }}><Icon size={18} />{label}</button>)}</nav><div className="studio-sidebar-footer"><a href="/" target="_blank" rel="noopener noreferrer"><Eye size={16} />Preview public site</a><button type="button" onClick={() => { sessionStorage.removeItem('sodangi-local-token'); setToken(''); window.location.reload(); }}><LogOut size={16} />Sign out / reset</button></div></aside><main className="studio-main"><header className="studio-topbar"><div><p className="studio-overline">Sodangi 2027</p><h1>{headings[tab]}</h1></div><span className="studio-admin-chip"><LockKeyhole size={15} />{status?.actor ?? 'Administrator'}</span></header>{notice && <div className={`studio-notice ${notice.tone}`} role="status"><>{notice.tone === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}</><span>{notice.text}</span><button type="button" aria-label="Dismiss message" onClick={() => setNotice(null)}><X size={15} /></button></div>}
+  return <div className="studio-app"><aside className="studio-sidebar"><div className="studio-brand"><img src="/assets/logo.jpg" alt="Sodangi logo" /><span>CONTENT STUDIO<small>PRIVATE ADMINISTRATION</small></span></div><nav aria-label="Admin dashboard sections">{navigation.map(([key, label, Icon]) => <button type="button" key={key} className={tab === key ? 'selected' : ''} aria-current={tab === key ? 'page' : undefined} onClick={() => { setTab(key); setNotice(null); }}><Icon size={18} />{label}</button>)}</nav><div className="studio-sidebar-footer"><a href="/" target="_blank" rel="noopener noreferrer"><Eye size={16} />Preview public site</a><button type="button" onClick={() => void signOut()}><LogOut size={16} />{authMode === 'password' ? 'Sign out' : 'Reset local access'}</button></div></aside><main className="studio-main"><header className="studio-topbar"><div><p className="studio-overline">Sodangi 2027</p><h1>{headings[tab]}</h1></div><span className="studio-admin-chip"><LockKeyhole size={15} />{status?.actor ?? 'Administrator'}</span></header>{notice && <div className={`studio-notice ${notice.tone}`} role="status"><>{notice.tone === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}</><span>{notice.text}</span><button type="button" aria-label="Dismiss message" onClick={() => setNotice(null)}><X size={15} /></button></div>}
     {tab === 'overview' && <section className="studio-panel"><div className="studio-stat-grid"><article><span>Published</span><b>{published}</b><small>Public stories</small></article><article><span>Drafts</span><b>{drafts}</b><small>Awaiting review</small></article><article><span>Subscribers</span><b>{status?.subscribers ?? 0}</b><small>Confirmed emails</small></article><article><span>Media storage</span><b>{status?.mediaStorage ? 'Ready' : '—'}</b><small>{status?.mediaStorage ? 'R2 connected' : 'Not configured'}</small></article></div><div className="studio-grid-two"><section className="studio-card"><p className="studio-overline">Start here</p><h2>Keep the public story current</h2><p>Update the homepage, biography, campaign identity or contact links; then publish news only after the source and Hausa copy are reviewed.</p><div className="studio-actions"><button type="button" className="studio-primary" onClick={() => setTab('entries')}><Plus size={16} />New publication</button><button type="button" className="studio-secondary" onClick={() => setTab('site')}><Edit3 size={16} />Edit website</button></div></section><section className="studio-card"><p className="studio-overline">Readiness</p><h2>Connection checks</h2><dl className="studio-definition-list"><div><dt><Database size={16} />D1 content database</dt><dd>Connected</dd></div><div><dt><ImageIcon size={16} />Media uploads</dt><dd>{status?.mediaStorage ? 'Configured' : 'Needs R2 binding'}</dd></div><div><dt><Mail size={16} />Newsletter mailer</dt><dd>{status?.emailReady ? 'Configured' : 'Not configured'}</dd></div></dl></section></div><section className="studio-card"><p className="studio-overline">Recent editorial actions</p><h2>Audit trail</h2>{status?.audit?.length ? <ol className="studio-audit">{status.audit.map((record: any, index: number) => <li key={`${record.created_at}-${index}`}><span>{record.action}: <strong>{record.target}</strong></span><small>{record.actor} · {dateLabel(record.created_at)}</small></li>)}</ol> : <p>No editorial actions have been recorded yet.</p>}</section></section>}
     {tab === 'site' && <SettingsEditor site={site} updateSite={(next: SiteData) => { setSite(next); setDirty(true); }} dirty={dirty} saving={saving} onSave={() => void saveSite()} upload={upload} />}
     {tab === 'entries' && <EntriesEditor entries={entries} setEntries={setEntries} api={api} upload={upload} showNotice={showNotice} />}
     {tab === 'integrations' && <FacebookIntegration api={api} showNotice={showNotice} refreshContent={refreshContent} />}
-    {tab === 'operations' && <section className="studio-panel"><div className="studio-panel-heading"><div><p className="studio-overline">Launch operations</p><h2>Security, editorial workflow and deployment</h2><p>Use this page as the operating checklist before publishing campaign content.</p></div></div><div className="studio-grid-two"><section className="studio-card"><ShieldCheck size={25} /><h2>Protect administration</h2><p>Cloudflare Access must protect <code>/admin*</code> and <code>/api/admin/*</code> on every production and preview hostname. Use MFA and a named-email allowlist.</p></section><section className="studio-card"><Radio size={25} /><h2>Publish responsibly</h2><p>Keep claims, names, figures, translations and social feeds in draft until a designated editor has reviewed the source material.</p></section><section className="studio-card"><Globe2 size={25} /><h2>Before launch</h2><p>Approve the privacy notice, contact details, social accounts, newsletter sender and Hausa copy. Test on a phone and in an unauthorised browser session.</p></section><section className="studio-card"><FileText size={25} /><h2>Backups and rollback</h2><p>Export D1 regularly, retain approved source assets, and use a Pages preview before merging changes into the production branch.</p></section></div></section>}
+    {tab === 'operations' && <section className="studio-panel"><div className="studio-panel-heading"><div><p className="studio-overline">Launch operations</p><h2>Security, editorial workflow and deployment</h2><p>Use this page as the operating checklist before publishing campaign content.</p></div></div><div className="studio-grid-two"><section className="studio-card"><ShieldCheck size={25} /><h2>Protect administration</h2><p>{authMode === 'password' ? 'Password mode uses a server-only secret, an 8-hour secure session, sign-out, CSRF checks and login throttling. Keep the password unique and share it only with the trusted owner.' : <>Cloudflare Access must protect <code>/admin*</code> and <code>/api/admin/*</code> on every production and preview hostname. Use MFA and a named-email allowlist.</>}</p></section><section className="studio-card"><Radio size={25} /><h2>Publish responsibly</h2><p>Keep claims, names, figures, translations and social feeds in draft until a designated editor has reviewed the source material.</p></section><section className="studio-card"><Globe2 size={25} /><h2>Before launch</h2><p>Approve the privacy notice, contact details, social accounts, newsletter sender and Hausa copy. Test on a phone and in an unauthorised browser session.</p></section><section className="studio-card"><FileText size={25} /><h2>Backups and rollback</h2><p>Export D1 regularly, retain approved source assets, and use a Pages preview before merging changes into the production branch.</p></section></div></section>}
   </main></div>;
 }

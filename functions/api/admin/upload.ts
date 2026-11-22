@@ -1,5 +1,5 @@
 import type {Ctx} from '../../_shared';
-import {json,fail,authorise,record} from '../../_shared';
+import {json,fail,authorise,record,requireAdminCsrf} from '../../_shared';
 const ALLOWED: Record<string,{ext:string;size:number;kind:'image'|'audio'}> = {
   'image/jpeg':{ext:'jpg',size:10_000_000,kind:'image'},
   'image/png':{ext:'png',size:10_000_000,kind:'image'},
@@ -15,6 +15,7 @@ const ALLOWED: Record<string,{ext:string;size:number;kind:'image'|'audio'}> = {
 };
 export const onRequestPost=async({request,env}:Ctx)=>{
  const admin=await authorise(request,env);if(!admin)return fail('Authentication required',401);
+ if(!requireAdminCsrf(request,admin))return fail('Invalid secure admin request.',403);
  if(!env.MEDIA)return fail('R2 MEDIA bucket is not configured',503);
  if(Number(request.headers.get('content-length')||0)>22_000_000)return fail('Upload maximum is 20 MB for audio',413);
  const form=await request.formData().catch(()=>null);const file=form?.get('file');

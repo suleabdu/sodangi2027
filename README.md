@@ -6,7 +6,7 @@ This source package contains:
 
 - Responsive pages for biography, SHARES Agenda, DIGITs, achievements, newsroom, media and contact.
 - English/Hausa support across public copy and editorial data, with bilingual administration.
-- A separate Cloudflare Access-protected `/admin` content studio.
+- A separate `/admin` content studio with Cloudflare Access for teams or an optional password-protected route for one trusted owner.
 - Optional admin-uploaded background music with visible play/pause and volume controls; browser autoplay restrictions apply.
 - Protected image/audio uploads to R2, D1 seed and existing-database migration.
 - A mobile-first protected content studio for branding, images, biography, bilingual content, stories, operations and Facebook Page sync settings.
@@ -22,7 +22,7 @@ npm run dev
 
 Open http://localhost:5173 for the static seed-data preview. For the full CMS, safe Cloudflare deployment, and existing-database upgrade path, follow the step-by-step [SETUP_GUIDE.md](SETUP_GUIDE.md), starting at **Choose the right path** and **Prepare the database**.
 
-**Production is not deployed or fully browser-tested by this source package alone.** Apply the current D1 migrations, configure Cloudflare Access and secrets, and complete device QA before launch. Additional Meta approvals and API credentials are required for Facebook sync and newsletters.
+**Production is not secure or fully browser-tested by this source package alone.** Apply the current D1 migrations, configure either Cloudflare Access or the documented password-mode secrets, and complete device QA before launch. Additional Meta approvals and API credentials are required for Facebook sync and newsletters.
 
 ## Source and factual review
 
@@ -30,4 +30,4 @@ Biographical roles are transcribed from campaign-supplied materials and should b
 
 ## Required configuration
 
-Official social account URLs and approved integration credentials; authorised administrator accounts and Cloudflare Access application details; an approved privacy notice and contact channel; newsletter sender configuration; and approved manifesto/biography evidence. Never commit passwords, access tokens, subscriber data or private documents to a public repository.
+Official social account URLs and approved integration credentials; authorised administrator accounts and Access details (or one privately stored password-mode credential); an approved privacy notice and contact channel; newsletter sender configuration; and approved manifesto/biography evidence. Never commit passwords, access tokens, subscriber data or private documents to a public repository.

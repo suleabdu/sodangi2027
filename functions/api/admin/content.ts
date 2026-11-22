@@ -1,5 +1,5 @@
 import type {Ctx} from '../../_shared';
-import {json,fail,authorise,record,validExternalUrl} from '../../_shared';
+import {json,fail,authorise,record,requireAdminCsrf,validExternalUrl} from '../../_shared';
 const select=`SELECT c.*,t.title AS title_ha,t.excerpt AS excerpt_ha,t.body AS body_ha
 FROM content c LEFT JOIN content_translations t ON c.id=t.content_id AND t.lang='ha'
 ORDER BY c.updated_at DESC LIMIT 300`;
@@ -9,6 +9,7 @@ export const onRequestGet=async({request,env}:Ctx)=>{
 };
 export const onRequestPost=async({request,env}:Ctx)=>{
  const admin=await authorise(request,env);if(!admin)return fail('Authentication required',401);
+ if(!requireAdminCsrf(request,admin))return fail('Invalid secure admin request.',403);
  const body:any=await request.json().catch(()=>null);
  if(!body||!['upsert','delete'].includes(body.action))return fail('Invalid content action');
  if(body.action==='delete'){

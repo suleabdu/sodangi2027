@@ -6,6 +6,22 @@ CREATE TABLE IF NOT EXISTS newsletter_subscribers (email TEXT PRIMARY KEY, conse
 CREATE INDEX IF NOT EXISTS idx_sub_confirm ON newsletter_subscribers(confirm_hash);
 CREATE INDEX IF NOT EXISTS idx_sub_unsub ON newsletter_subscribers(unsubscribe_hash);
 CREATE TABLE IF NOT EXISTS admin_audit (id TEXT PRIMARY KEY, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS admin_sessions (
+  session_hash TEXT PRIMARY KEY,
+  csrf_hash TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_seen_at INTEGER NOT NULL,
+  revoked_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_admin_sessions_expiry ON admin_sessions(expires_at);
+CREATE TABLE IF NOT EXISTS admin_login_attempts (
+  attempt_hash TEXT PRIMARY KEY,
+  attempts INTEGER NOT NULL,
+  window_started_at INTEGER NOT NULL,
+  locked_until INTEGER
+);
 CREATE TABLE IF NOT EXISTS integration_settings (
   provider TEXT PRIMARY KEY,
   enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)),

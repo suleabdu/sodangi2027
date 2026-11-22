@@ -1,5 +1,5 @@
 import type {Ctx} from '../../_shared';
-import {authorise, fail, json, record} from '../../_shared';
+import {authorise, fail, json, record, requireAdminCsrf} from '../../_shared';
 import {getFacebookSettings, isFacebookPageUrl} from '../../_facebook';
 
 const intervals = new Set([15, 30, 60, 120, 360]);
@@ -32,6 +32,7 @@ export const onRequestGet = async ({request, env}: Ctx) => {
 export const onRequestPut = async ({request, env}: Ctx) => {
   const admin = await authorise(request, env);
   if (!admin) return fail('Authentication required', 401);
+  if (!requireAdminCsrf(request, admin)) return fail('Invalid secure admin request.', 403);
   if (Number(request.headers.get('content-length') || 0) > 10_000) return fail('Payload too large', 413);
   const body: unknown = await request.json().catch(() => null);
   const facebook = body && typeof body === 'object' ? (body as {facebook?: unknown}).facebook : null;

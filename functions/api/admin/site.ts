@@ -1,5 +1,5 @@
 import type {Ctx} from '../../_shared';
-import {json,fail,authorise,record,validExternalUrl} from '../../_shared';
+import {json,fail,authorise,record,requireAdminCsrf,validExternalUrl} from '../../_shared';
 export const onRequestGet=async({request,env}:Ctx)=>{
  const a=await authorise(request,env);if(!a)return fail('Administrator authentication required.',401);
  const r=await env.DB.prepare("SELECT body,updated_at FROM site_config WHERE id='main'").first();
@@ -7,6 +7,7 @@ export const onRequestGet=async({request,env}:Ctx)=>{
 };
 export const onRequestPut=async({request,env}:Ctx)=>{
  const a=await authorise(request,env);if(!a)return fail('Administrator authentication required.',401);
+ if(!requireAdminCsrf(request,a))return fail('Invalid secure admin request.',403);
  if(Number(request.headers.get('content-length')||0)>150000)return fail('Payload too large',413);
  const data=await request.json().catch(()=>null);
  if(!data||typeof data!=='object'||Array.isArray(data))return fail('Invalid site settings');
