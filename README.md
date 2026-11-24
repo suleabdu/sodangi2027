@@ -20,7 +20,7 @@ npm run check
 npm run dev
 ```
 
-Open http://localhost:5173 for the static seed-data preview. For the full CMS, safe Cloudflare deployment, and existing-database upgrade path, follow the step-by-step [SETUP_GUIDE.md](SETUP_GUIDE.md), starting at **Choose the right path** and **Prepare the database**.
+Open http://localhost:5173 for the static seed-data preview. For the live CMS and password-admin setup, follow the short, sequential [SETUP_GUIDE.md](SETUP_GUIDE.md) from step 1 through step 10.
 
 **Production is not secure or fully browser-tested by this source package alone.** Apply the current D1 migrations, configure either Cloudflare Access or the documented password-mode secrets, and complete device QA before launch. Additional Meta approvals and API credentials are required for Facebook sync and newsletters.
 
