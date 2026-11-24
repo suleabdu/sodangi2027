@@ -1,12 +1,16 @@
+# Example for a separate scheduled Worker (not the Cloudflare Pages project).
+# Ensure the database_id equals the D1 ID in the repository root wrangler.toml.
 name = "sodangi-facebook-sync"
 main = "facebook-sync.ts"
 compatibility_date = "2026-11-01"
+
 [triggers]
 crons = ["*/15 * * * *"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "sodangi-cms"
-database_id = "d3b20826742de95a7c7239639320a2d9"
-# The Page ID, public Page URL, publication mode and cadence are configured in
-# the protected website admin dashboard. Store only the Meta token as a Worker
-# secret: npx wrangler secret put FB_PAGE_ACCESS_TOKEN --config workers/wrangler.toml
+database_id = "e0a9b2f2-77f9-4119-a8b7-167384f8d0c5"
+
+# FB_PAGE_ACCESS_TOKEN is a Worker Secret, not a TOML value:
+# npx wrangler secret put FB_PAGE_ACCESS_TOKEN --config workers/wrangler.toml
